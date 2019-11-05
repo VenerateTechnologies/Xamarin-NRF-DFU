@@ -10,7 +10,7 @@ namespace Plugin.XamarinNordicDFU
     {
         public Func<IDevice, bool> Success { get; set; } = null;
 
-        public async void Scan()
+        public async void Scan(string Name = @"", string Guid = @"")
         {
             var adapter = CrossBluetoothLE.Current.Adapter;
             
@@ -18,11 +18,27 @@ namespace Plugin.XamarinNordicDFU
             {
                 if (Success != null)
                 {
-                    var bStatus = Success.Invoke(result.Device);
+                    var strGuid = result.Device.Id.ToString().ToLower().Replace("-", "");
 
-                    if (bStatus)
+                    if (result.Device != null && !string.IsNullOrEmpty(result.Device.Name) &&
+                        result.Device.Name.Equals(Name) && !string.IsNullOrEmpty(Guid))
                     {
-                        await adapter.StopScanningForDevicesAsync();
+                        var bStatus = Success.Invoke(result.Device);
+
+                        if (bStatus)
+                        {
+                            await adapter.StopScanningForDevicesAsync();
+                        }
+                    }
+                    else if (result.Device != null && !string.IsNullOrEmpty(strGuid) &&
+                             strGuid.EndsWith(Guid.ToLower().Replace("-", "")) && !string.IsNullOrEmpty(Guid))
+                    {
+                        var bStatus = Success.Invoke(result.Device);
+
+                        if (bStatus)
+                        {
+                            await adapter.StopScanningForDevicesAsync();
+                        }
                     }
                 }
                 else
