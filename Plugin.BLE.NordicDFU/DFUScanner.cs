@@ -21,7 +21,7 @@ namespace Plugin.XamarinNordicDFU
                     var strGuid = result.Device.Id.ToString().ToLower().Replace("-", "");
 
                     if (result.Device != null && !string.IsNullOrEmpty(result.Device.Name) &&
-                        result.Device.Name.Equals(Name) && !string.IsNullOrEmpty(Guid))
+                        result.Device.Name.Equals(Name) && !string.IsNullOrEmpty(Name))
                     {
                         var bStatus = Success.Invoke(result.Device);
 
