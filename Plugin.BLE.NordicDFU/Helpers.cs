@@ -2,9 +2,7 @@
 
 using System;
 using System.Threading.Tasks;
-using Plugin.BLE;
-using Plugin.BLE.Abstractions;
-using Plugin.BLE.Abstractions.Contracts;
+using Plugin.BluetoothLE;
 using System.Diagnostics;
 using System.Reactive.Linq;
 using System.IO;
@@ -19,7 +17,7 @@ namespace Plugin.XamarinNordicDFU
         /// Assert that commmand executed successfully and raise error if not
         /// </summary>
         /// <param name="result"></param>
-        private void AssertSuccess(byte[] result)
+        private void AssertSuccess(CharacteristicGattResult result)
         {
             /*
 			* The response received from the DFU device contains:
@@ -32,10 +30,10 @@ namespace Plugin.XamarinNordicDFU
             * | ...     | ...    | ...                                                |
 			* +---------+--------+----------------------------------------------------+
 			*/
-            if (result[2] != SecureDFUCommandSuccess)
+            if (result.Data[2] != SecureDFUCommandSuccess)
             {
                 InvokeError(result);
-                throw new Exception(String.Format("Assertion failed while testing command [{0}] response status: [{1}]", result[1], result[2]));
+                throw new Exception(String.Format("Assertion failed while testing command [{0}] response status: [{1}]", result.Data[1], result.Data[2]));
             }
         }
         /// <summary>
@@ -43,10 +41,10 @@ namespace Plugin.XamarinNordicDFU
         /// </summary>
         /// <param name="controlPoint"></param>
         /// <returns></returns>
-        private async Task ExitSecureDFU(ICharacteristic controlPoint)
+        private async Task ExitSecureDFU(IGattCharacteristic controlPoint)
         {
             var notif = GetTimedNotification(controlPoint);
-            await controlPoint.WriteAsync(new byte[] { });
+            await controlPoint.Write(new byte[] { }).Timeout(OperationTimeout);
             var result = await notif.Task;
 
             AssertSuccess(result);
@@ -55,17 +53,17 @@ namespace Plugin.XamarinNordicDFU
         /// Invoke error from BLE response
         /// </summary>
         /// <param name="response"></param>
-        private void InvokeError(byte[] result)
+        private void InvokeError(CharacteristicGattResult result)
         {
-            var err = (ResponseErrors)result[2];
+            var err = (ResponseErrors)result.Data[2];
             if (err == ResponseErrors.NRF_DFU_RES_CODE_EXT_ERROR)
             {
-                var error = (ExtendedErrors)result[3];
+                var error = (ExtendedErrors)result.Data[3];
                 DFUEvents.OnExtendedError?.Invoke(error);
             }
             else
             {
-                var error = (ResponseErrors)result[3];
+                var error = (ResponseErrors)result.Data[3];
                 DFUEvents.OnResponseError?.Invoke(error);
             }
         }
@@ -100,7 +98,7 @@ namespace Plugin.XamarinNordicDFU
         /// <param name="device"></param>
         /// <param name="prn"></param>
         /// <returns></returns>
-        private async Task SetPRN(ICharacteristic controlPoint, int prn)
+        private async Task SetPRN(IGattCharacteristic controlPoint, int prn)
         {
             // PRN value should be LSB
             byte[] data = new byte[] {
@@ -111,11 +109,11 @@ namespace Plugin.XamarinNordicDFU
             SetUint16LSB(data, 1, prn);
 
             var notif = GetTimedNotification(controlPoint);
-            await controlPoint.WriteAsync(data);
+            await controlPoint.Write(data).Timeout(OperationTimeout);
 
             var result = await notif.Task;
             
-            Debug.WriteLineIf(LogLevelDebug, String.Format("Received PRN set response: {0}", BitConverter.ToString(result)));
+            Debug.WriteLineIf(LogLevelDebug, String.Format("Received PRN set response: {0}", BitConverter.ToString(result.Data)));
 
             AssertSuccess(result);
         }
@@ -126,7 +124,7 @@ namespace Plugin.XamarinNordicDFU
         /// <param name="type"></param>
         /// <param name="size"></param>
         /// <returns></returns>
-        private async Task CreateCommand(ICharacteristic controlPoint, SecureDFUCreateCommandType type, int size)
+        private async Task CreateCommand(IGattCharacteristic controlPoint, SecureDFUCreateCommandType type, int size)
         {
             byte[] data = new byte[]{
                 CCreateObject,
@@ -139,12 +137,12 @@ namespace Plugin.XamarinNordicDFU
             SetUInt32LSB(data, 2, size);
             
             var notif = GetTimedNotification(controlPoint);
-            await controlPoint.WriteAsync(data);
+            await controlPoint.Write(data).Timeout(OperationTimeout);
             var result = await notif.Task;
 
             AssertSuccess(result);
 
-            Debug.WriteLineIf(LogLevelDebug, String.Format("Command object created {0}", BitConverter.ToString(result)));
+            Debug.WriteLineIf(LogLevelDebug, String.Format("Command object created {0}", BitConverter.ToString(result.Data)));
         }
         /// <summary>
         /// Select command before starting to upload something
@@ -152,17 +150,17 @@ namespace Plugin.XamarinNordicDFU
         /// <param name="device"></param>
         /// <param name="command"></param>
         /// <returns></returns>
-        private async Task<ObjectInfo> SelectCommand(ICharacteristic controlPoint, SecureDFUSelectCommandType command)
+        private async Task<ObjectInfo> SelectCommand(IGattCharacteristic controlPoint, SecureDFUSelectCommandType command)
         {
             ObjectInfo info = new ObjectInfo();
             var tcs = new TaskCompletionSource<bool>();
             
             var notif = GetTimedNotification(controlPoint);
             
-            await controlPoint.WriteAsync(new byte[] { SelectCommandPrefix, (byte)command });
+            await controlPoint.Write(new byte[] { SelectCommandPrefix, (byte)command }).Timeout(OperationTimeout);
 
             var result = await notif.Task;
-            byte[] response = result;
+            byte[] response = result.Data;
 
             AssertSuccess(result);
 
@@ -187,13 +185,12 @@ namespace Plugin.XamarinNordicDFU
         /// </summary>
         /// <param name="device"></param>
         /// <returns></returns>
-        private async Task<ObjectChecksum> ReadChecksum(ICharacteristic controlPoint)
+        private async Task<ObjectChecksum> ReadChecksum(IGattCharacteristic controlPoint)
         {
             Debug.WriteLineIf(LogLevelDebug, String.Format("Begin read checksum"));
             ObjectChecksum checksum = new ObjectChecksum();
-
-            byte[] result = null;
-
+            
+            CharacteristicGattResult result = null;
             for (var retry = 0; retry < MaxRetries; retry++)
             {
                 try
@@ -201,9 +198,9 @@ namespace Plugin.XamarinNordicDFU
                     // Request checksum
                     var notif = GetTimedNotification(controlPoint);
 
-                    var re = await controlPoint.WriteAsync(CCalculateCRC);
+                    var re = await controlPoint.Write(CCalculateCRC).Timeout(OperationTimeout);
                     Debug.WriteLine(re);
-                    result = (await notif.Task);
+                    result = await notif.Task;
                     break;
                 }
                 catch (Exception)
@@ -214,16 +211,16 @@ namespace Plugin.XamarinNordicDFU
                 {
                     if(retry == MaxRetries)
                     {
-                        throw new Exception("DFU Timeout");
+                        throw new DFUTimeout();
                     }
                 }
             }
 
-            Debug.WriteLineIf(LogLevelDebug, String.Format("Check Sum Response {0}", BitConverter.ToString(result)));
+            Debug.WriteLineIf(LogLevelDebug, String.Format("Check Sum Response {0}", BitConverter.ToString(result.Data)));
 
             AssertSuccess(result);
 
-            SetChecksum(checksum, result);
+            SetChecksum(checksum, result.Data);
 
             Debug.WriteLineIf(LogLevelDebug, String.Format("End read checksum"));
             return checksum;
@@ -238,7 +235,7 @@ namespace Plugin.XamarinNordicDFU
         /// <param name="transferBytes"></param>
         /// <param name="remoteOffset"></param>
         /// <returns></returns>
-        private async Task<int> TransferData(ICharacteristic packetPoint, CRC32 crc, Stream file, /*int prn = -1,*/ int offsetStart = 0, int offsetEnd = -1, int MTU = 20)
+        private async Task<int> TransferData(IGattCharacteristic packetPoint, CRC32 crc, Stream file, /*int prn = -1,*/ int offsetStart = 0, int offsetEnd = -1, int MTU = 20)
         {
             const int RESERVED_BYTES = 3;
             int bytesWritten = 0;
@@ -284,7 +281,7 @@ namespace Plugin.XamarinNordicDFU
                     // Specific for iOS, if no timeout, then sending happens to be blocked
                     await Task.Delay(1);
 
-                    await packetPoint.WriteAsync(pending);
+                    await packetPoint.WriteWithoutResponse(pending).Timeout(OperationTimeout);
 
                     packetsSent++;
                     bytesWritten += pending.Length;
@@ -306,14 +303,14 @@ namespace Plugin.XamarinNordicDFU
         /// </summary>
         /// <param name="device"></param>
         /// <returns></returns>
-        private async Task ExecuteCommand(ICharacteristic controlPoint, bool skipRegistring = false)
+        private async Task ExecuteCommand(IGattCharacteristic controlPoint,bool skipRegistring = false)
         {
             var notif = GetTimedNotification(controlPoint);
-            await controlPoint.WriteAsync(CExecute);
+            await controlPoint.Write(CExecute).Timeout(OperationTimeout);
 
-            var result = (await notif.Task);
+            var result = await notif.Task;
 
-            Debug.WriteLineIf(LogLevelDebug, String.Format("Execute command result {0}", BitConverter.ToString(result)));
+            Debug.WriteLineIf(LogLevelDebug, String.Format("Execute command result {0}", BitConverter.ToString(result.Data)));
             AssertSuccess(result);
         }
         /// <summary>
@@ -340,9 +337,9 @@ namespace Plugin.XamarinNordicDFU
         /// </summary>
         /// <param name="characteristic"></param>
         /// <returns></returns>
-        private TaskCompletionSource<byte[]> GetTimedNotification(ICharacteristic characteristic)
+        private TaskCompletionSource<CharacteristicGattResult> GetTimedNotification(IGattCharacteristic characteristic)
         {
-            var tcs = new TaskCompletionSource<byte[]>();
+            var tcs = new TaskCompletionSource<CharacteristicGattResult>();
 
             bool notificationReceived = false;
             IDisposable disposable = null;
@@ -353,22 +350,20 @@ namespace Plugin.XamarinNordicDFU
                     if (!notificationReceived)
                     {
                         disposable?.Dispose();
-                        tcs.TrySetException(new Exception("DFU Timeout"));
+                        tcs.TrySetException(new DFUTimeout());
                     }
                 }
             });
 
-            characteristic.ValueUpdated += (_sender, result) =>
+            disposable = characteristic.WhenNotificationReceived().Subscribe(result =>
             {
                 lock (locked)
                 {
                     notificationReceived = true;
                 }
-
                 disposable?.Dispose();
-                tcs.TrySetResult(result.Characteristic.Value);
-            };
-
+                tcs.TrySetResult(result);
+            });
             return tcs;
         }
         #endregion

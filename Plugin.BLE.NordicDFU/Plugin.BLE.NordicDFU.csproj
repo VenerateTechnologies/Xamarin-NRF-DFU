@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Plugin.BLE" Version="2.1.1" />
+    <PackageReference Include="Plugin.BluetoothLE" Version="6.2.6" />
     <PackageReference Include="System.Reactive.Linq" Version="4.2.0" />
   </ItemGroup>
 

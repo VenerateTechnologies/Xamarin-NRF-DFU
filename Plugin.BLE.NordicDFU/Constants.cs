@@ -12,8 +12,8 @@ namespace Plugin.XamarinNordicDFU
         private const int MaxRetries = 3;
 
         #region Services and Characteristics
-        public static readonly Guid DfuServicePublic = new Guid("0000FE59-0000-1000-8000-00805F9B34FB");
         private readonly Guid DfuService =                              new Guid("0000FE59-0000-1000-8000-00805F9B34FB");
+        public static Guid DfuServicePublic { get; } =                  new Guid("0000FE59-0000-1000-8000-00805F9B34FB");
         private readonly Guid DfuButtonlessCharacteristicWithoutBonds = new Guid("8EC90003-F315-4F60-9FB8-838830DAEA50");
         private readonly Guid SecureDFUControlPointCharacteristic =     new Guid("8EC90001-F315-4F60-9FB8-838830DAEA50");
         private readonly Guid SecureDFUPacketCharacteristic =           new Guid("8EC90002-F315-4F60-9FB8-838830DAEA50");

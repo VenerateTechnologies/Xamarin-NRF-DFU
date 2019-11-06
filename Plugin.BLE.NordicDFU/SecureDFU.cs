@@ -2,21 +2,14 @@
 
 using System;
 using System.Threading.Tasks;
-using Plugin.BLE;
-using Plugin.BLE.Abstractions;
+using Plugin.BluetoothLE;
 using System.Diagnostics;
 using System.Reactive.Linq;
 using System.IO;
-using Plugin.BLE.Abstractions.Contracts;
-
 namespace Plugin.XamarinNordicDFU
 {
-    public partial class DFU
+    partial class DFU
     {
-        private IDevice Device { get; set; } = null;
-
-        private int MtuSize { get; set; } = 0;
-
         /// <summary>
         /// Run actual filmware upgrade procedure (Secure DFU)
         /// </summary>
@@ -24,44 +17,44 @@ namespace Plugin.XamarinNordicDFU
         /// <param name="FirmwarePath"></param>
         /// <param name="InitFilePath"></param>
         /// <returns></returns>
-        public async Task RunSecureDFU(IDevice device, Stream FirmwarePacket, Stream InitPacket)
+        private async Task RunSecureDFU(IDevice device, Stream FirmwarePacket, Stream InitPacket)
         {
-            Device = device;
+            IGattCharacteristic controlPoint = null;
+            IGattCharacteristic packetPoint = null;
 
-            var adapter = CrossBluetoothLE.Current.Adapter;
-            adapter.DeviceConnected += Adapter_DeviceConnected;
-            await adapter.ConnectToDeviceAsync(Device, new ConnectParameters(false, true));
-        }
+            //await RefreshGattAsync(device);
 
-        private async void Adapter_DeviceConnected(object sender, BLE.Abstractions.EventArgs.DeviceEventArgs e)
-        {
-            ICharacteristic controlPoint = null;
-            ICharacteristic packetPoint = null;
+            device.Connect();
+            await device.ConnectWait().Timeout(DeviceConnectionTimeout);
 
-            MtuSize = await Device.RequestMtuAsync(256);
+            // Request MTU only once
+            await device.RequestMtu(256).Timeout(OperationTimeout);
 
-            foreach (var objService in await Device.GetServicesAsync())
-            {
-                foreach (var objCharacteristic in await objService.GetCharacteristicsAsync())
-                {
-                    if (objCharacteristic.Uuid.Equals(SecureDFUControlPointCharacteristic))
-                        controlPoint = objCharacteristic;
-                    else if (objCharacteristic.Uuid.Equals(SecureDFUPacketCharacteristic))
-                        packetPoint = objCharacteristic;
-                }
+            controlPoint = await device.GetKnownCharacteristics(DfuService, SecureDFUControlPointCharacteristic).Timeout(OperationTimeout);
+            packetPoint = await device.GetKnownCharacteristics(DfuService, SecureDFUPacketCharacteristic).Timeout(OperationTimeout);
+            await controlPoint.EnableNotifications(true);
+            try {
+                await SendInitPacket(device, InitPacket, controlPoint, packetPoint);
+                await SendFirmware(device, FirmwarePacket, controlPoint, packetPoint);
             }
-
-            await controlPoint.StartUpdatesAsync();
+            catch (Exception)
+            {
+                await Cleanup(controlPoint, device);
+                throw;
+            }
+            finally
+            {
+                await Cleanup(controlPoint, device);
+            }
         }
-
         /// <summary>
         /// Close connections, try to reenter standart mode, unsubscribe notifications
         /// </summary>
         /// <returns></returns>
-        private async Task Cleanup(ICharacteristic controlPoint, IDevice device)
+        private async Task Cleanup(IGattCharacteristic controlPoint, IDevice device)
         {
-            await controlPoint.StopUpdatesAsync();
-            await CrossBluetoothLE.Current.Adapter.DisconnectDeviceAsync(device);
+            await controlPoint.DisableNotifications();
+            device.CancelConnection();
         }
         /// <summary>
         /// Upload Init package (*.dat)
@@ -71,19 +64,19 @@ namespace Plugin.XamarinNordicDFU
         /// <param name="controlPoint">Secure DFU control point characteristic [Commands / Notifications]</param>
         /// <param name="packetPoint">Secure DFU packet point characteristic [Data of images]</param>
         /// <returns></returns>
-        private async Task SendInitPacket(IDevice device, Stream InitPacket, ICharacteristic controlPoint, ICharacteristic packetPoint)
+        private async Task SendInitPacket(IDevice device, Stream InitPacket, IGattCharacteristic controlPoint, IGattCharacteristic packetPoint)
         {
             Debug.WriteLineIf(LogLevelDebug, "Start of init packet send");
             //FileStream file = new FileStream(InitFilePath, FileMode.Open, FileAccess.Read);
             var file = InitPacket;
             int imageSize = (int)file.Length;// Around ?~ 130bytes 
-            var MTU = Math.Min(MtuSize, DFUMaximumMTU);
+            var MTU = Math.Min(device.MtuSize, DFUMaximumMTU);
             CRC32 crc = new CRC32();
 
             ObjectInfo info = await SelectCommand(controlPoint, SecureDFUSelectCommandType.CommmandObject);
 
             bool resumeSendingInitPacket = false;
-
+            
             if (info.offset > 0 && info.offset <= imageSize)
             {
                 // Check if remote sent content is valid
@@ -125,7 +118,7 @@ namespace Plugin.XamarinNordicDFU
                     // Allocate new object
                     await CreateCommand(controlPoint, SecureDFUCreateCommandType.CommmandObject, imageSize);
                 }
-                await TransferData(packetPoint, crc, file, offsetStart: info.offset, MTU: MTU, offsetEnd: imageSize);
+                await TransferData(packetPoint, crc, file, offsetStart: info.offset, MTU:MTU, offsetEnd: imageSize);
 
                 ObjectChecksum check = await ReadChecksum(controlPoint);
                 info.offset = check.offset;
@@ -156,7 +149,7 @@ namespace Plugin.XamarinNordicDFU
                     else
                     {
                         Debug.WriteLineIf(LogLevelDebug, String.Format("CRC does not match!"));
-                        await CrossBluetoothLE.Current.Adapter.DisconnectDeviceAsync(device);
+                        device.CancelConnection();
                         return;
                     }
                 }
@@ -172,23 +165,23 @@ namespace Plugin.XamarinNordicDFU
         /// <param name="controlPoint">Secure DFU control point characteristic [Commands / Notifications]</param>
         /// <param name="packetPoint">Secure DFU packet point characteristic [Data of images]</param>
         /// <returns></returns>
-        private async Task SendFirmware(IDevice device, Stream FirmwarePacket, ICharacteristic controlPoint, ICharacteristic packetPoint)
+        private async Task SendFirmware(IDevice device, Stream FirmwarePacket, IGattCharacteristic controlPoint, IGattCharacteristic packetPoint)
         {
             //FileStream file = new FileStream(FirmwareFilePath, FileMode.Open, FileAccess.Read);
             var file = FirmwarePacket;
             long firmwareSize = file.Length;
-            var MTU = Math.Min(MtuSize, DFUMaximumMTU);
+            var MTU = Math.Min(device.MtuSize, DFUMaximumMTU);
             const int prn = 0;
 
             ObjectInfo info = await SelectCommand(controlPoint, SecureDFUSelectCommandType.DataObject);
             int objectSize = info.maxSize;// Use maximum available object size
-
+            
             Debug.WriteLineIf(LogLevelDebug, String.Format("Data object info received (Max size = {0}, Offset = {1}, CRC = {2})", objectSize, info.offset, info.CRC32));
-
+            
             CRC32 crc = new CRC32();
-
+            
             await SetPRN(controlPoint, prn);
-
+            
             // Try to allocate first object
             int startAllocatedSize = (int)(firmwareSize - info.offset);
             startAllocatedSize = Math.Min(startAllocatedSize, objectSize);
@@ -196,7 +189,7 @@ namespace Plugin.XamarinNordicDFU
             {
                 await CreateCommand(controlPoint, SecureDFUCreateCommandType.DataObject, startAllocatedSize);
             }
-
+            
             IDisposable dispose = null;
             var LastOffsetFailed = 0;
             var LastOffsetFailCount = 0;
@@ -204,22 +197,21 @@ namespace Plugin.XamarinNordicDFU
             while (true)
             {
                 byte[] lastData;
-
-                controlPoint.ValueUpdated += (_sender, result) =>
-                {
-                    lastData = result.Characteristic.Value;
-                    
-                    Debug.WriteLineIf(LogLevelDebug, String.Format("Notification {0}", BitConverter.ToString(result.Characteristic.Value)));
-                   
-                    if (result.Characteristic.Value.Length == 11)
+                dispose = controlPoint.WhenNotificationReceived().Subscribe(
+                    result =>
                     {
-                        ObjectChecksum checks = new ObjectChecksum();
-                        SetChecksum(checks, result.Characteristic.Value);
-                        info.offset = checks.offset;
-                        info.CRC32 = checks.CRC32;
-                        Debug.WriteLineIf(LogLevelDebug, String.Format("{0} ::: PRN response check: {1}, offset: {2}", DateTime.Now.ToString("HH:mm:ss.ffffff"), checks.CRC32, checks.offset));
+                        lastData = result.Data;
+                        Debug.WriteLineIf(LogLevelDebug, String.Format("Notification {0}", BitConverter.ToString(result.Data)));
+                        if(result.Data.Length == 11)
+                        {
+                            ObjectChecksum checks = new ObjectChecksum();
+                            SetChecksum(checks, result.Data);
+                            info.offset = checks.offset;
+                            info.CRC32 = checks.CRC32;
+                            Debug.WriteLineIf(LogLevelDebug, String.Format("{0} ::: PRN response check: {1}, offset: {2}", DateTime.Now.ToString("HH:mm:ss.ffffff"), checks.CRC32, checks.offset));
+                        }
                     }
-                };
+                );
 
                 int endOffset = GetCurrentObjectEnd(info.offset, objectSize, firmwareSize);
                 int objectOffset = info.offset;
@@ -241,8 +233,7 @@ namespace Plugin.XamarinNordicDFU
                     Debug.WriteLineIf(LogLevelDebug, String.Format("{0} ::: Written bytes {1}, progress: {2}, elapsed: {3}", DateTime.Now.ToString("HH:mm:ss.ffffff"), bytesWritten, objectOffset / (float)firmwareSize, DateTime.Now - DFUStartTime));
                 }
                 // if PRN with correct offset not received, force to calculate CRC and offset
-                if (info.offset != objectOffset)
-                {
+                if (info.offset != objectOffset) {
                     Debug.WriteLineIf(LogLevelDebug, String.Format("{0} ::: Force chekcsum calc", DateTime.Now.ToString("HH:mm:ss.ffffff")));
                     ObjectChecksum check = await ReadChecksum(controlPoint);
                     info.CRC32 = check.CRC32;
@@ -254,7 +245,7 @@ namespace Plugin.XamarinNordicDFU
                 uint remotecrc = (uint)info.CRC32;
                 if (localcrc == remotecrc)
                 {
-                    await ExecuteCommand(controlPoint, skipRegistring: true);
+                    await ExecuteCommand(controlPoint, skipRegistring:true);
                     if (firmwareSize == info.offset)
                     {
                         // Firmware upload finished
@@ -288,17 +279,17 @@ namespace Plugin.XamarinNordicDFU
                     crc.Reset();
                     if (currentStartOffset > 0)
                     {
-                        file.Read(crcBuffer, 0, crcBuffer.Length);
+                        file.Read(crcBuffer,0, crcBuffer.Length);
 
                         crc.Update(crcBuffer);
                     }
-                    if (LastOffsetFailed != currentStartOffset)
+                    if(LastOffsetFailed != currentStartOffset)
                     {
                         LastOffsetFailed = currentStartOffset;
                         LastOffsetFailCount = 0;
                     }
                     LastOffsetFailCount++;
-                    if (LastOffsetFailCount == MaxRetries)
+                    if(LastOffsetFailCount == MaxRetries)
                     {
                         throw new Exception("Too much retries for one object");
                     }

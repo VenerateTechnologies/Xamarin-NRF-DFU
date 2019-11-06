@@ -2,7 +2,7 @@
 
 using System;
 using System.Threading.Tasks;
-using Plugin.BLE;
+using Plugin.BluetoothLE;
 using System.Diagnostics;
 using System.Reactive.Linq;
 using System.IO;

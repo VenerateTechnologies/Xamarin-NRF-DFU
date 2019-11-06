@@ -3,7 +3,7 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Plugin.BLE;
+using Plugin.BluetoothLE;
 using System.Diagnostics;
 namespace Plugin.XamarinNordicDFU
 {
@@ -63,6 +63,31 @@ namespace Plugin.XamarinNordicDFU
         public DFU(bool logLevelDebug = false)
         {
             LogLevelDebug = logLevelDebug;
+        }
+        public async Task Start(IDevice device, Stream FirmwarePacket, Stream InitPacket)
+        {
+            DFUStartTime = DateTime.Now;
+            IDevice newDevice = null;
+            try
+            {
+                if (FirmwarePacket == null || InitPacket == null)
+                {
+                    throw new Exception(GlobalErrors.FILE_STREAMS_NOT_SUPPLIED.ToString());
+                }
+                newDevice = await ButtonlessDFUWithoutBondsToSecureDFU(device);
+
+                // Run firmware upgrade when device is switched to secure dfu mode
+                await RunSecureDFU(newDevice, FirmwarePacket, InitPacket);
+                DFUEvents.OnSuccess?.Invoke(DateTime.Now - DFUStartTime);
+            }
+            catch(Exception ex)
+            {
+                DFUEvents.OnError?.Invoke(ex.ToString());
+                Debug.WriteLineIf(LogLevelDebug, ex.StackTrace);
+                
+                newDevice?.CancelConnection();
+                device?.CancelConnection();
+            }
         }
     }
 }

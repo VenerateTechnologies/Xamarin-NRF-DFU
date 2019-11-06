@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
-using Plugin.BLE;
-using Plugin.BLE.Abstractions.Contracts;
+using Plugin.BluetoothLE;
+using System.Reactive.Linq;
 
 namespace Plugin.XamarinNordicDFU
 {
@@ -12,13 +12,20 @@ namespace Plugin.XamarinNordicDFU
 
         public async void Scan(string Name = @"", string Guid = @"")
         {
-            var adapter = CrossBluetoothLE.Current.Adapter;
-            
-            adapter.DeviceDiscovered += async (sender, result) =>
+            var adapter = CrossBleAdapter.Current;
+
+            adapter.Scan(new ScanConfig()
+            {
+                ScanType = BleScanType.Balanced,
+                ServiceUuids = new List<Guid>(new Guid[]
+                {
+                    DFU.DfuServicePublic
+                })
+            }).Subscribe(result =>
             {
                 if (Success != null)
                 {
-                    var strGuid = result.Device.Id.ToString().ToLower().Replace("-", "");
+                    var strGuid = result.Device.Uuid.ToString().ToLower().Replace("-", "");
 
                     if (result.Device != null && !string.IsNullOrEmpty(result.Device.Name) &&
                         result.Device.Name.Equals(Name) && !string.IsNullOrEmpty(Name))
@@ -27,7 +34,7 @@ namespace Plugin.XamarinNordicDFU
 
                         if (bStatus)
                         {
-                            await adapter.StopScanningForDevicesAsync();
+                            adapter.StopScan();
                         }
                     }
                     else if (result.Device != null && !string.IsNullOrEmpty(strGuid) &&
@@ -37,19 +44,13 @@ namespace Plugin.XamarinNordicDFU
 
                         if (bStatus)
                         {
-                            await adapter.StopScanningForDevicesAsync();
+                            adapter.StopScan();
                         }
                     }
                 }
                 else
                 {
-                    await adapter.StopScanningForDevicesAsync();
                 }
-            };
-
-            await adapter.StartScanningForDevicesAsync(new Guid[]
-            {
-                DFU.DfuServicePublic
             });
         }
     }
