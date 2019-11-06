@@ -3,7 +3,7 @@
 using System;
 namespace Plugin.XamarinNordicDFU
 {
-    partial class DFU
+    public partial class DFU
     {
         /// <summary>
         /// iOS delays MTU negotiation, so it is around 512 which is not supported for dfu

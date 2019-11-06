@@ -50,7 +50,7 @@ namespace Plugin.XamarinNordicDFU
     {
         FILE_STREAMS_NOT_SUPPLIED = 0x00
     }
-    partial class DFU
+    public partial class DFU
     {
         
 

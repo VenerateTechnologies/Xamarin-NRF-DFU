@@ -16,7 +16,7 @@ namespace Plugin.XamarinNordicDFU
     {
 
     }
-    partial class DFU
+    public partial class DFU
     {
         /// <summary>
         /// Switch device in Secure DFU state

@@ -8,7 +8,7 @@ using System.Reactive.Linq;
 using System.IO;
 namespace Plugin.XamarinNordicDFU
 {
-    partial class DFU
+    public partial class DFU
     {
         /// <summary>
         /// Run actual filmware upgrade procedure (Secure DFU)

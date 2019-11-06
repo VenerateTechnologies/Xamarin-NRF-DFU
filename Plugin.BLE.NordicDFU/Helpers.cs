@@ -10,7 +10,7 @@ using System.Collections.Generic;
 
 namespace Plugin.XamarinNordicDFU
 {
-    partial class DFU
+    public partial class DFU
     {
         #region Helper Functions
         /// <summary>
