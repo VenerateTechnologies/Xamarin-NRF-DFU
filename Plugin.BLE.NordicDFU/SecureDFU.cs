@@ -17,7 +17,7 @@ namespace Plugin.XamarinNordicDFU
         /// <param name="FirmwarePath"></param>
         /// <param name="InitFilePath"></param>
         /// <returns></returns>
-        private async Task RunSecureDFU(IDevice device, Stream FirmwarePacket, Stream InitPacket)
+        public async Task RunSecureDFU(IDevice device, Stream FirmwarePacket, Stream InitPacket)
         {
             IGattCharacteristic controlPoint = null;
             IGattCharacteristic packetPoint = null;
