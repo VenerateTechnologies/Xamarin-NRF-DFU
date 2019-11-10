@@ -24,7 +24,7 @@ namespace Plugin.XamarinNordicDFU
         /// </summary>
         /// <param name="device"></param>
         /// <returns>Device which is in buttonles state</returns>
-        private async Task<IDevice> ButtonlessDFUWithoutBondsToSecureDFU(IDevice device)
+        public async Task<IDevice> ButtonlessDFUWithoutBondsToSecureDFU(IDevice device)
         {
             Debug.WriteLineIf(LogLevelDebug, String.Format("Start of Buttonless switching"));
 
