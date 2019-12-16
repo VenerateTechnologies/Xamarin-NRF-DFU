@@ -191,6 +191,7 @@ namespace Plugin.XamarinNordicDFU
             ObjectChecksum checksum = new ObjectChecksum();
             
             CharacteristicGattResult result = null;
+
             for (var retry = 0; retry < MaxRetries; retry++)
             {
                 try
@@ -198,9 +199,9 @@ namespace Plugin.XamarinNordicDFU
                     // Request checksum
                     var notif = GetTimedNotification(controlPoint);
 
-                    var re = await controlPoint.Write(CCalculateCRC).Timeout(OperationTimeout);
-                    Debug.WriteLine(re);
-                    result = await notif.Task;
+                    result = await controlPoint.Write(CCalculateCRC);
+                    Debug.WriteLine(result);
+
                     break;
                 }
                 catch (Exception)
@@ -218,11 +219,13 @@ namespace Plugin.XamarinNordicDFU
 
             Debug.WriteLineIf(LogLevelDebug, String.Format("Check Sum Response {0}", BitConverter.ToString(result.Data)));
 
-            AssertSuccess(result);
+            if (result != null)
+            {
+                AssertSuccess(result);
+                SetChecksum(checksum, result.Data);
+                Debug.WriteLineIf(LogLevelDebug, String.Format("End read checksum"));
+            }
 
-            SetChecksum(checksum, result.Data);
-
-            Debug.WriteLineIf(LogLevelDebug, String.Format("End read checksum"));
             return checksum;
         }
         /// <summary>
